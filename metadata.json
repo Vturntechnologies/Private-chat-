@@ -1,5 +1,7 @@
 {
-  "name": "",
-  "description": "",
-  "requestFramePermissions": []
+  "name": "Liquid Chat",
+  "description": "A private messaging app with an admin panel and AI voice calling, featuring a dark liquid glass UI.",
+  "requestFramePermissions": [
+    "microphone"
+  ]
 }
