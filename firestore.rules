@@ -81,5 +81,12 @@ service cloud.firestore {
       allow update: if false; // Messages cannot be edited
       allow delete: if isAdmin();
     }
+
+    match /calls/{callId} {
+      allow read: if isAuthenticated() && (request.auth.uid == resource.data.callerId || request.auth.uid == resource.data.receiverId);
+      allow create: if isAuthenticated() && request.auth.uid == request.resource.data.callerId;
+      allow update: if isAuthenticated() && (request.auth.uid == resource.data.callerId || request.auth.uid == resource.data.receiverId);
+      allow delete: if isAdmin();
+    }
   }
 }

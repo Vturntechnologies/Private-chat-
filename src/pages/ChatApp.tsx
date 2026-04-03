@@ -2,7 +2,7 @@ import React, { useState, useEffect, useRef } from 'react';
 import { useAuth } from '../contexts/AuthContext';
 import { db } from '../firebase';
 import { collection, query, where, onSnapshot, addDoc, serverTimestamp, orderBy, doc, getDoc, setDoc } from 'firebase/firestore';
-import { LogOut, Phone, Send, User as UserIcon, Settings, Menu, MessageSquare } from 'lucide-react';
+import { LogOut, Phone, Send, User as UserIcon, Settings, Menu, MessageSquare, Bot, PhoneIncoming, PhoneOff } from 'lucide-react';
 import VoiceCall from '../components/VoiceCall';
 import { motion, AnimatePresence } from 'motion/react';
 import { format } from 'date-fns';
@@ -41,6 +41,7 @@ export default function ChatApp() {
   const [isSidebarOpen, setIsSidebarOpen] = useState(true);
   const [isProfileModalOpen, setIsProfileModalOpen] = useState(false);
   const [profilePicUrl, setProfilePicUrl] = useState('');
+  const [activeCalls, setActiveCalls] = useState<any[]>([]);
   
   const messagesEndRef = useRef<HTMLDivElement>(null);
 
@@ -76,9 +77,41 @@ export default function ChatApp() {
       console.error("Error fetching chats:", error);
     });
 
+    // Listen for calls
+    const qIncoming = query(
+      collection(db, 'calls'),
+      where('receiverId', '==', user.uid),
+      where('status', 'in', ['ringing', 'accepted'])
+    );
+    
+    const qOutgoing = query(
+      collection(db, 'calls'),
+      where('callerId', '==', user.uid),
+      where('status', 'in', ['ringing', 'accepted'])
+    );
+
+    let incomingList: any[] = [];
+    let outgoingList: any[] = [];
+
+    const updateCalls = () => {
+      setActiveCalls([...incomingList, ...outgoingList]);
+    };
+
+    const unsubIncoming = onSnapshot(qIncoming, (snapshot) => {
+      incomingList = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }));
+      updateCalls();
+    });
+
+    const unsubOutgoing = onSnapshot(qOutgoing, (snapshot) => {
+      outgoingList = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }));
+      updateCalls();
+    });
+
     return () => {
       usersUnsub();
       chatsUnsub();
+      unsubIncoming();
+      unsubOutgoing();
     };
   }, [user]);
 
@@ -190,6 +223,53 @@ export default function ChatApp() {
     }
   };
 
+  const incomingCall = activeCalls.find(c => c.receiverId === user?.uid && c.status === 'ringing');
+  const outgoingCall = activeCalls.find(c => c.callerId === user?.uid && c.status === 'ringing');
+  const activeCall = activeCalls.find(c => c.status === 'accepted');
+
+  const initiateCall = async () => {
+    if (!user || !selectedUser || !selectedChat) return;
+    try {
+      await addDoc(collection(db, 'calls'), {
+        callerId: user.uid,
+        callerName: user.displayName || user.email,
+        callerPhoto: user.photoURL || '',
+        receiverId: selectedUser.uid,
+        receiverName: selectedUser.displayName || selectedUser.email,
+        receiverPhoto: selectedUser.photoURL || '',
+        chatId: selectedChat.id,
+        status: 'ringing',
+        createdAt: serverTimestamp()
+      });
+    } catch (err) {
+      console.error("Error initiating call", err);
+    }
+  };
+
+  const acceptCall = async (callId: string) => {
+    try {
+      await setDoc(doc(db, 'calls', callId), { status: 'accepted' }, { merge: true });
+    } catch (err) {
+      console.error("Error accepting call", err);
+    }
+  };
+
+  const declineCall = async (callId: string) => {
+    try {
+      await setDoc(doc(db, 'calls', callId), { status: 'declined' }, { merge: true });
+    } catch (err) {
+      console.error("Error declining call", err);
+    }
+  };
+
+  const endCall = async (callId: string) => {
+    try {
+      await setDoc(doc(db, 'calls', callId), { status: 'ended' }, { merge: true });
+    } catch (err) {
+      console.error("Error ending call", err);
+    }
+  };
+
   return (
     <div className="flex h-screen bg-neutral-950 text-white overflow-hidden relative">
       {/* Background Orbs */}
@@ -293,13 +373,22 @@ export default function ChatApp() {
                 </div>
               </div>
               
-              <button
-                onClick={() => setIsCallActive(true)}
-                className="flex items-center gap-2 px-4 py-2 bg-white/10 hover:bg-white/20 border border-white/10 rounded-full transition-all text-sm font-medium"
-              >
-                <Phone className="w-4 h-4" />
-                <span className="hidden sm:inline">AI Call</span>
-              </button>
+              <div className="flex items-center gap-3">
+                <button
+                  onClick={() => setIsCallActive(true)}
+                  className="w-10 h-10 flex items-center justify-center bg-white/5 hover:bg-white/10 border border-white/10 rounded-full transition-all text-blue-400"
+                  title="AI Assistant"
+                >
+                  <Bot className="w-5 h-5" />
+                </button>
+                <button
+                  onClick={initiateCall}
+                  className="w-10 h-10 flex items-center justify-center bg-white/5 hover:bg-white/10 border border-white/10 rounded-full transition-all text-green-400"
+                  title="Voice Call"
+                >
+                  <Phone className="w-5 h-5" />
+                </button>
+              </div>
             </header>
 
             {/* Messages */}
@@ -375,6 +464,111 @@ export default function ChatApp() {
 
       {/* Voice Call Modal */}
       {isCallActive && <VoiceCall onClose={() => setIsCallActive(false)} />}
+
+      {/* Call Modals */}
+      <AnimatePresence>
+        {/* Incoming Call */}
+        {incomingCall && !activeCall && (
+          <motion.div 
+            initial={{ opacity: 0, y: -50 }}
+            animate={{ opacity: 1, y: 0 }}
+            exit={{ opacity: 0, y: -50 }}
+            className="fixed top-6 left-1/2 -translate-x-1/2 z-50 w-full max-w-sm bg-neutral-900/90 backdrop-blur-2xl border border-white/10 rounded-3xl p-6 shadow-2xl flex flex-col items-center"
+          >
+            <div className="w-16 h-16 rounded-full bg-neutral-800 flex items-center justify-center mb-4 overflow-hidden border-2 border-white/10">
+              {incomingCall.callerPhoto ? (
+                <img src={incomingCall.callerPhoto} alt="Caller" className="w-full h-full object-cover" />
+              ) : (
+                <span className="text-xl font-medium">{incomingCall.callerName.charAt(0).toUpperCase()}</span>
+              )}
+            </div>
+            <h3 className="text-lg font-semibold text-white mb-1">{incomingCall.callerName}</h3>
+            <p className="text-neutral-400 text-sm mb-6 animate-pulse">Incoming call...</p>
+            
+            <div className="flex items-center gap-6">
+              <button
+                onClick={() => declineCall(incomingCall.id)}
+                className="w-14 h-14 rounded-full bg-red-500 hover:bg-red-600 text-white flex items-center justify-center shadow-lg shadow-red-500/20 transition-all"
+              >
+                <PhoneOff className="w-6 h-6" />
+              </button>
+              <button
+                onClick={() => acceptCall(incomingCall.id)}
+                className="w-14 h-14 rounded-full bg-green-500 hover:bg-green-600 text-white flex items-center justify-center shadow-lg shadow-green-500/20 transition-all"
+              >
+                <PhoneIncoming className="w-6 h-6" />
+              </button>
+            </div>
+          </motion.div>
+        )}
+
+        {/* Outgoing Call */}
+        {outgoingCall && !activeCall && (
+          <motion.div 
+            initial={{ opacity: 0, scale: 0.9 }}
+            animate={{ opacity: 1, scale: 1 }}
+            exit={{ opacity: 0, scale: 0.9 }}
+            className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/60 backdrop-blur-md"
+          >
+            <div className="w-full max-w-sm bg-neutral-900/80 backdrop-blur-2xl border border-white/10 rounded-[2rem] p-8 shadow-2xl flex flex-col items-center relative overflow-hidden">
+              <div className="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 w-64 h-64 bg-green-500/20 rounded-full blur-[64px] pointer-events-none" />
+              
+              <div className="w-24 h-24 rounded-full bg-neutral-800 flex items-center justify-center mb-6 overflow-hidden border-4 border-neutral-900 relative z-10">
+                {outgoingCall.receiverPhoto ? (
+                  <img src={outgoingCall.receiverPhoto} alt="Receiver" className="w-full h-full object-cover" />
+                ) : (
+                  <span className="text-3xl font-medium">{outgoingCall.receiverName.charAt(0).toUpperCase()}</span>
+                )}
+              </div>
+              <h3 className="text-2xl font-semibold text-white mb-2 relative z-10">{outgoingCall.receiverName}</h3>
+              <p className="text-neutral-400 text-sm mb-10 animate-pulse relative z-10">Ringing...</p>
+              
+              <button
+                onClick={() => endCall(outgoingCall.id)}
+                className="w-16 h-16 rounded-full bg-red-500 hover:bg-red-600 text-white flex items-center justify-center shadow-lg shadow-red-500/20 transition-all relative z-10"
+              >
+                <PhoneOff className="w-7 h-7" />
+              </button>
+            </div>
+          </motion.div>
+        )}
+
+        {/* Active Call */}
+        {activeCall && (
+          <motion.div 
+            initial={{ opacity: 0, scale: 0.9 }}
+            animate={{ opacity: 1, scale: 1 }}
+            exit={{ opacity: 0, scale: 0.9 }}
+            className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/60 backdrop-blur-md"
+          >
+            <div className="w-full max-w-sm bg-neutral-900/80 backdrop-blur-2xl border border-white/10 rounded-[2rem] p-8 shadow-2xl flex flex-col items-center relative overflow-hidden">
+              <div className="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 w-64 h-64 bg-blue-500/20 rounded-full blur-[64px] pointer-events-none" />
+              
+              <div className="w-24 h-24 rounded-full bg-neutral-800 flex items-center justify-center mb-6 overflow-hidden border-4 border-neutral-900 relative z-10">
+                {activeCall.callerId === user?.uid ? (
+                  activeCall.receiverPhoto ? <img src={activeCall.receiverPhoto} alt="User" className="w-full h-full object-cover" /> : <span className="text-3xl font-medium">{activeCall.receiverName.charAt(0).toUpperCase()}</span>
+                ) : (
+                  activeCall.callerPhoto ? <img src={activeCall.callerPhoto} alt="User" className="w-full h-full object-cover" /> : <span className="text-3xl font-medium">{activeCall.callerName.charAt(0).toUpperCase()}</span>
+                )}
+              </div>
+              <h3 className="text-2xl font-semibold text-white mb-2 relative z-10">
+                {activeCall.callerId === user?.uid ? activeCall.receiverName : activeCall.callerName}
+              </h3>
+              <div className="flex items-center gap-2 text-green-400 text-sm mb-10 relative z-10">
+                <span className="w-2 h-2 rounded-full bg-green-500 animate-pulse" />
+                Call Connected
+              </div>
+              
+              <button
+                onClick={() => endCall(activeCall.id)}
+                className="w-16 h-16 rounded-full bg-red-500 hover:bg-red-600 text-white flex items-center justify-center shadow-lg shadow-red-500/20 transition-all relative z-10"
+              >
+                <PhoneOff className="w-7 h-7" />
+              </button>
+            </div>
+          </motion.div>
+        )}
+      </AnimatePresence>
 
       {/* Profile Pic Modal */}
       <AnimatePresence>
