@@ -66,8 +66,14 @@ export default function ChatApp() {
         chatsData.push({ id: doc.id, ...doc.data() } as Chat);
       });
       // Sort by updatedAt descending
-      chatsData.sort((a, b) => (b.updatedAt?.toMillis() || 0) - (a.updatedAt?.toMillis() || 0));
+      chatsData.sort((a, b) => {
+        const timeA = a.updatedAt?.toMillis?.() || Date.now();
+        const timeB = b.updatedAt?.toMillis?.() || Date.now();
+        return timeB - timeA;
+      });
       setChats(chatsData);
+    }, (error) => {
+      console.error("Error fetching chats:", error);
     });
 
     return () => {
@@ -81,8 +87,7 @@ export default function ChatApp() {
 
     const q = query(
       collection(db, 'messages'),
-      where('chatId', '==', selectedChat.id),
-      orderBy('createdAt', 'asc')
+      where('chatId', '==', selectedChat.id)
     );
 
     const msgsUnsub = onSnapshot(q, (snapshot) => {
@@ -90,8 +95,18 @@ export default function ChatApp() {
       snapshot.forEach((doc) => {
         msgsData.push({ id: doc.id, ...doc.data() } as Message);
       });
+      
+      // Sort locally to avoid needing a composite index in Firestore
+      msgsData.sort((a, b) => {
+        const timeA = a.createdAt?.toMillis?.() || Date.now();
+        const timeB = b.createdAt?.toMillis?.() || Date.now();
+        return timeA - timeB;
+      });
+      
       setMessages(msgsData);
       scrollToBottom();
+    }, (error) => {
+      console.error("Error fetching messages:", error);
     });
 
     return () => msgsUnsub();

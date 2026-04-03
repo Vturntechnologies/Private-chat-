@@ -26,21 +26,18 @@ export default function AdminPanel() {
   const [success, setSuccess] = useState('');
 
   useEffect(() => {
-    fetchUsers();
-  }, []);
-
-  const fetchUsers = async () => {
-    try {
-      const querySnapshot = await getDocs(collection(db, 'users'));
+    const unsub = onSnapshot(collection(db, 'users'), (snapshot) => {
       const usersData: UserData[] = [];
-      querySnapshot.forEach((doc) => {
+      snapshot.forEach((doc) => {
         usersData.push(doc.data() as UserData);
       });
       setUsers(usersData);
-    } catch (err) {
-      console.error("Error fetching users", err);
-    }
-  };
+    }, (error) => {
+      console.error("Error fetching users:", error);
+    });
+
+    return () => unsub();
+  }, []);
 
   const handleCreateUser = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -70,9 +67,17 @@ export default function AdminPanel() {
       setEmail('');
       setPassword('');
       setDisplayName('');
-      fetchUsers();
     } catch (err: any) {
-      setError(err.message || 'Failed to create user');
+      console.error("Create user error:", err);
+      if (err.code === 'auth/email-already-in-use') {
+        setError('This email is already registered. Please use a different email.');
+      } else if (err.code === 'auth/weak-password') {
+        setError('Password should be at least 6 characters.');
+      } else if (err.code === 'auth/invalid-email') {
+        setError('Please enter a valid email address.');
+      } else {
+        setError(err.message || 'Failed to create user');
+      }
     } finally {
       setLoading(false);
     }
